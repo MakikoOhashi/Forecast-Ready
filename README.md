@@ -116,12 +116,55 @@ The primary focus is on system design decisions — durability, idempotency, obs
 6. evaluate_against_actuals
 7. emit_metrics_and_logs
 
+Workflow: forecast_pipeline
+
+Purpose:
+Generate and persist a single forecast run based on historical facts, ensuring reproducibility, idempotency, and observability.
+
+1. load_historical_facts
+
+Loads historical sales and inventory facts from the database for the target scope and time range.
+Guarantee: All downstream steps operate on a consistent, immutable snapshot of factual data.
+
+2. validate_and_fill_gaps
+
+Validates data completeness and applies gap-filling or fallback rules for missing values.
+Guarantee: No downstream step receives incomplete or structurally invalid time-series data.
+
+3. aggregate_time_windows
+
+Aggregates raw facts into predefined time windows (e.g. rolling averages, weekly buckets).
+Guarantee: Forecast inputs are normalized and comparable across SKUs and time ranges.
+
+4. generate_forecast
+
+Generates forecast values using a pluggable prediction strategy.
+Guarantee: A forecast is produced deterministically from the aggregated inputs.
+
+5. explain_forecast
+
+Generates a human-readable explanation describing why the forecast changed or remained stable.
+Guarantee: Each forecast result is accompanied by an interpretable rationale.
+
+6. persist_forecast_result
+
+Persists forecast outputs as immutable prediction records.
+Guarantee: Forecast results are never overwritten and can be audited historically.
+
+7. record_forecast_metrics
+
+Compares forecasts against known outcomes (when available) and records evaluation metrics.
+Guarantee: Forecast accuracy can be tracked and analyzed over time.
+
 ## Job: DailyAggregationJob
 Schedule: once per day
 
 - aggregate_daily_sales
 - aggregate_inventory_snapshot
 - persist_daily_facts
+
+Job: daily_fact_aggregation
+- Periodically aggregates raw events into immutable factual records.
 
 
 ## TODO
