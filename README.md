@@ -106,6 +106,22 @@ Rather than treating forecasting as a one-off AI task, this project treats it as
 
 The primary focus is on system design decisions — durability, idempotency, observability, and extensibility — which are critical for production-grade forecasting systems.
 
+## Workflow: ForecastPipeline
+
+1. load_historical_facts
+2. validate_and_normalize_data
+3. generate_features
+4. run_forecast
+5. persist_forecast_result
+6. evaluate_against_actuals
+7. emit_metrics_and_logs
+
+## Job: DailyAggregationJob
+Schedule: once per day
+
+- aggregate_daily_sales
+- aggregate_inventory_snapshot
+- persist_daily_facts
 
 
 ## TODO
