@@ -1,5 +1,11 @@
 import type { EventConfig, Handlers } from 'motia';
 import { z } from 'zod';
+import { GeminiClient } from '../lib/gemini-client';
+import { config as dotenvConfig } from 'dotenv';
+import { resolve } from 'path';
+
+// Load environment variables
+dotenvConfig({ path: resolve(process.cwd(), '.env') });
 
 const inputSchema = z.object({
   requestId: z.string(),
@@ -133,7 +139,8 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
       // Additional deterministic metrics
       movingAverage: finalMovingAverage,
       trendSlope: trendSlope
-    }
+    },
+    forecastRationale: '' // Will be populated by AI explanation
   };
 
   logger.info('Deterministic forecast generated successfully', {
@@ -146,6 +153,75 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
     forecastPeriodsCount: forecastPeriods.length,
     step: 'generate_forecast'
   });
+
+  // Step 4: Generate AI explanation using Gemini (non-deterministic but safe fallback)
+  // This step is completely separate from the deterministic forecast logic
+  // If Gemini fails, we use a deterministic fallback explanation
+  try {
+    // Initialize Gemini client with API key from environment
+    const geminiApiKey = process.env.GEMINI_API_KEY || '';
+    const geminiClient = new GeminiClient(geminiApiKey, logger);
+
+    // Prepare request with deterministic values only
+    const explanationRequest = {
+      movingAverage: finalMovingAverage,
+      trendSlope: trendSlope,
+      historicalDataPoints: historicalData.dailySales.length,
+      forecastHorizon: forecastPeriods.length,
+      productId: historicalData.productId
+    };
+
+    logger.info('Attempting to generate AI forecast explanation', {
+      requestId,
+      productId: historicalData.productId,
+      usingGemini: !!geminiApiKey,
+      step: 'generate_forecast_explanation'
+    });
+
+    // Generate explanation from Gemini API
+    const explanationResponse = await geminiClient.generateForecastExplanation(explanationRequest);
+
+    if (explanationResponse.success && explanationResponse.explanation) {
+      forecastResult.forecastRationale = explanationResponse.explanation;
+      logger.info('Successfully generated AI forecast explanation', {
+        requestId,
+        productId: historicalData.productId,
+        explanation: explanationResponse.explanation,
+        step: 'generate_forecast_explanation'
+      });
+    } else {
+      // Fallback to deterministic explanation if Gemini fails
+      const fallbackExplanation = geminiClient.generateFallbackExplanation(explanationRequest);
+      forecastResult.forecastRationale = fallbackExplanation;
+      logger.warn('Using fallback explanation due to Gemini API failure', {
+        requestId,
+        productId: historicalData.productId,
+        explanation: fallbackExplanation,
+        error: explanationResponse.error,
+        step: 'generate_forecast_explanation'
+      });
+    }
+  } catch (error) {
+    // Handle any unexpected errors and use fallback
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Unexpected error in Gemini explanation generation', {
+      requestId,
+      productId: historicalData.productId,
+      error: errorMessage,
+      step: 'generate_forecast_explanation'
+    });
+
+    // Create fallback explanation manually if Gemini client fails to initialize
+    const geminiClient = new GeminiClient('', logger);
+    const fallbackExplanation = geminiClient.generateFallbackExplanation({
+      movingAverage: finalMovingAverage,
+      trendSlope: trendSlope,
+      historicalDataPoints: historicalData.dailySales.length,
+      forecastHorizon: forecastPeriods.length,
+      productId: historicalData.productId
+    });
+    forecastResult.forecastRationale = fallbackExplanation;
+  }
 
   // Emit event for persisting forecast result
   await emit({

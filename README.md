@@ -643,3 +643,10 @@ Sales History
 + Fallback Defaults (when data missing)
   ↓
 Inventory Requirement Forecast
+
+
+This project intentionally separates deterministic forecasting logic from AI-generated explanations.
+
+Forecast values are fully reproducible and derived only from historical data.
+
+AI is used solely to generate human-readable rationale, ensuring explainability without compromising determinism.

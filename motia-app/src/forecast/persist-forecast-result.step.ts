@@ -2,6 +2,7 @@ import type { EventConfig, Handlers } from 'motia';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase';
 
+// Define forecast result schema with optional rationale
 const inputSchema = z.object({
   requestId: z.string(),
   forecastResult: z.object({
@@ -26,7 +27,7 @@ const inputSchema = z.object({
       movingAverage: z.number().optional(),
       trendSlope: z.number().optional()
     })
-  })
+  }).passthrough() // Allow additional properties like forecastRationale
 });
 
 export const config: EventConfig = {
@@ -42,6 +43,11 @@ export const config: EventConfig = {
 export const handler: Handlers['PersistForecastResult'] = async (input, { logger }) => {
   const { requestId, forecastResult } = input;
 
+  // Type assertion to handle the forecastRationale property
+  const typedForecastResult = forecastResult as typeof forecastResult & {
+    forecastRationale?: string;
+  };
+
   logger.info('Starting to persist forecast results to Supabase', {
     requestId,
     productId: forecastResult.productId,
@@ -55,10 +61,12 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
   const productId = forecastResult.productId; // Use the productId as-is
 
   // Insert each forecast period as a separate row in Supabase
-  const insertPromises = forecastResult.forecastPeriods.map(async (period, index) => {
-    const explanation = `Forecast generated using ${forecastResult.forecastMethod} method. ` +
-                       `Moving average: ${forecastResult.forecastSummary.movingAverage?.toFixed(2) || 'N/A'}, ` +
-                       `Trend slope: ${forecastResult.forecastSummary.trendSlope?.toFixed(2) || 'N/A'}.`;
+  const insertPromises = typedForecastResult.forecastPeriods.map(async (period, index) => {
+    // Use AI-generated rationale if available, otherwise use deterministic explanation
+    const forecastRationale = typedForecastResult.forecastRationale ||
+                             `Forecast generated using ${typedForecastResult.forecastMethod} method. ` +
+                             `Moving average: ${typedForecastResult.forecastSummary.movingAverage?.toFixed(2) || 'N/A'}, ` +
+                             `Trend slope: ${typedForecastResult.forecastSummary.trendSlope?.toFixed(2) || 'N/A'}.`;
 
     const { data, error } = await supabase
       .from('forecast.forecast_results')
@@ -68,7 +76,8 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
         forecast_date: period.date,
         forecast_quantity: Math.round(period.forecastValue),
         model_version: 'v0-dummy',
-        explanation: explanation
+        explanation: forecastRationale,
+        forecast_rationale: forecastRationale // Store in the new column
       })
       .select();
 
