@@ -2,8 +2,7 @@
 
 ## Problem Statement
 
-Demand and inventory forecasting is inherently uncertain and time-dependent.
-In real production systems, forecasts are not single AI outputs but continuous processes that ingest new data, recompute predictions, evaluate accuracy, and adapt over time.
+Demand and inventory forecasting is inherently uncertain and time-dependent. In real production systems, forecasts are not single AI outputs but continuous processes that ingest new data, recompute predictions, evaluate accuracy, and adapt over time.
 
 Many forecasting projects fail not because of poor models, but because the backend systems around them lack durability, observability, and reproducibility.
 
@@ -14,160 +13,300 @@ This project focuses on building a forecast-ready backend — a system designed 
 This project intentionally does not aim to:
 
 - Build a high-accuracy machine learning model
-
 - Implement Shopify OAuth, billing, or production app installation flows
-
 - Create a fully-featured frontend UI
-
 - Connect to real production store data
+- Implement scheduled execution or cron jobs
+- Integrate with external e-commerce platforms
 
 The goal is backend architecture and execution reliability, not end-to-end product completeness.
 
 ## System Overview
 
-This system provides a backend capable of:
+This forecasting system uses **Motia** as the orchestration engine and **Supabase** as the persistent data store to create a reproducible, observable forecasting pipeline.
 
-- Ingesting historical sales and inventory data
+### High-Level Architecture
 
-- Running forecasting pipelines asynchronously
+**Motia** serves as the execution engine:
+- Orchestrates the forecasting pipeline workflow
+- Provides event-driven architecture with state persistence
+- Handles asynchronous processing and error recovery
+- Offers observability through logging and metrics
 
-- Persisting forecasts and their evaluation results
+**Supabase (PostgreSQL)** serves as the source of truth:
+- Stores immutable historical facts (sales, inventory)
+- Persists immutable forecast predictions
+- Maintains relationships between stores, products, and forecasts
+- Provides queryable results for verification and analysis
 
-- Supporting re-runs, retries, and future system extensions
+## Execution Flow
 
-The system is designed to be extensible to e-commerce platforms such as Shopify, without being coupled to platform-specific implementations.
+The system follows a clear end-to-end flow:
 
-## Core Design Principles
-### Fact vs Prediction
+1. **API Trigger**: HTTP POST request to `/forecast` endpoint initiates the pipeline
+2. **Pipeline Execution**: Motia orchestrates the three-step forecasting workflow
+3. **Data Persistence**: Results are stored in Supabase as immutable records
+4. **Verification**: Logs and database records confirm successful execution
 
-- Facts represent confirmed historical data (e.g., sales, inventory levels)
+## API Trigger Mechanism
 
-- Predictions represent forecasted values and are never overwritten
+Forecast execution is explicitly triggered via HTTP API:
 
-- Facts and predictions are stored separately to allow evaluation and auditing
+```bash
+POST /forecast
+Content-Type: application/json
 
-### Idempotency
+{
+  "productId": "product-123",
+  "timeRange": "last-30-days"
+}
+```
 
-- Re-running the same job for the same date produces the same result
+**Response:**
+```json
+{
+  "message": "Forecast pipeline started successfully",
+  "status": "processing",
+  "requestId": "abc123def45",
+  "productId": "product-123",
+  "timeRange": "last-30-days"
+}
+```
 
-- This allows safe retries and scheduled re-computation
+The API endpoint (`ForecastAPI`) emits a `load-historical-facts` event that starts the `forecast_pipeline` workflow.
 
-### Re-runnable Pipelines
+## Forecast Pipeline: Step-by-Step
 
-- Forecast pipelines can be re-executed when inputs or logic change
+The `forecast_pipeline` consists of three deterministic steps:
 
-- Past forecasts remain preserved for comparison
+### 1. load_historical_facts
 
-### Observability
+**Purpose:** Load immutable historical data from Supabase
 
-- Forecast results are compared against actual outcomes
+**Implementation:** `LoadHistoricalFacts` step handler
 
-- Prediction errors are stored to enable future evaluation and improvement
+**Process:**
+- Queries `forecast.daily_sales` table for historical sales data
+- Queries `forecast.inventory_snapshots` table for inventory levels
+- Retrieves data for the specified product and time range (default: last 30 days)
+- Validates data presence and completeness
+- Emits `generate-forecast` event with loaded data
 
-## Architecture Overview
+**Data Structure:**
+```typescript
+{
+  productId: string,
+  timeRange: string,
+  dailySales: Array<{date: string, value: number}>,
+  inventorySnapshots: Array<{date: string, value: number}>,
+  loadedAt: string
+}
+```
 
-### Supabase (PostgreSQL)
-Acts as the source of truth for historical data, forecasts, and evaluation results.
+### 2. generate_forecast
 
-### Motia
-Serves as the execution engine for backend logic:
+**Purpose:** Generate deterministic forecast using loaded historical data
 
-Jobs handle scheduled data aggregation
+**Implementation:** `GenerateForecast` step handler
 
-Workflows orchestrate forecasting pipelines with state persistence
+**Process:**
+- Receives historical data from previous step
+- Calculates 7-day moving average (deterministic)
+- Computes trend slope from first to last data point (deterministic)
+- Generates 5-period forecast using formula: `moving_average + (trend_slope * days_ahead)`
+- Calculates confidence intervals based on historical variance
+- Emits `persist-forecast-result` event with forecast results
 
-### AI / Forecast Logic
-Used to generate forecast values and human-readable explanations.
-The specific model or algorithm is replaceable and not the focus of this project.
+**Forecast Method:** Deterministic moving average with trend adjustment
+**Confidence Level:** 95% (configurable)
 
-## Execution Model
+**Output Structure:**
+```typescript
+{
+  requestId: string,
+  productId: string,
+  generatedAt: string,
+  forecastMethod: string,
+  confidenceLevel: number,
+  forecastPeriods: Array<{
+    date: string,
+    forecastValue: number,
+    confidenceInterval: {lower: number, upper: number}
+  }>,
+  forecastSummary: {
+    averageForecast: number,
+    minForecast: number,
+    maxForecast: number,
+    trend: number,
+    movingAverage: number,
+    trendSlope: number
+  }
+}
+```
 
-- Historical data is ingested or aggregated via scheduled jobs
+### 3. persist_forecast_result
 
-- A forecasting workflow processes the data step-by-step
+**Purpose:** Store forecast results as immutable records in Supabase
 
-- Forecast results are persisted as immutable records
+**Implementation:** `PersistForecastResult` step handler
 
-- Actual outcomes are later compared against predictions
+**Process:**
+- Receives forecast results from previous step
+- Inserts each forecast period as a separate row in `forecast.forecast_results` table
+- Generates human-readable explanation including method and parameters
+- Stores immutable records with timestamps and model version
+- Logs successful insertion with Supabase record IDs
+
+**Database Schema:**
+```sql
+forecast.forecast_results (
+  id: uuid (primary key),
+  store_id: uuid,
+  product_id: uuid,
+  forecast_date: date,
+  forecast_quantity: integer,
+  model_version: text,
+  explanation: text,
+  created_at: timestamptz
+)
+```
+
+## Data Model: Facts vs Predictions
+
+### Facts (Immutable Historical Data)
+
+**Characteristics:**
+- Represent confirmed, actual historical events
+- Never modified after creation
+- Serve as input to forecasting algorithms
+- Stored in dedicated tables with unique constraints
+
+**Tables:**
+- `forecast.daily_sales`: Actual sales quantities by date
+- `forecast.inventory_snapshots`: Actual inventory levels by date
+
+**Example:**
+```sql
+INSERT INTO forecast.daily_sales
+(store_id, product_id, sales_date, quantity)
+VALUES ('store-1', 'product-123', '2023-01-15', 42);
+```
+
+### Predictions (Immutable Forecast Results)
+
+**Characteristics:**
+- Represent forecasted future values
+- Never overwritten or modified
+- Generated deterministically from facts
+- Stored separately for auditability and comparison
+
+**Tables:**
+- `forecast.forecast_results`: Forecasted quantities by future date
+- `forecast.forecast_evaluations`: Comparison of forecasts vs actuals
+
+**Example:**
+```sql
+INSERT INTO forecast.forecast_results
+(store_id, product_id, forecast_date, forecast_quantity, model_version, explanation)
+VALUES ('store-1', 'product-123', '2023-02-01', 45, 'v0-dummy', 'Forecast generated using deterministic-moving-average-with-trend method');
+```
+
+## System Verification
+
+### 1. Motia Workbench Logs
+
+**Location:** Motia Workbench UI or logs
+**What to Check:**
+- Pipeline execution logs with `requestId` correlation
+- Step-by-step progression: `load_historical_facts` → `generate_forecast` → `persist_forecast_result`
+- Data summaries and validation messages
+- Error logs (if any) with stack traces
+
+**Example Log Entry:**
+```
+INFO: Historical facts loaded successfully from Supabase
+  requestId: "abc123def45"
+  dailySalesCount: 30
+  inventorySnapshotsCount: 30
+  step: "load_historical_facts"
+```
+
+### 2. Supabase Database Verification
+
+**Table:** `forecast.forecast_results`
+**Query:**
+```sql
+SELECT * FROM forecast.forecast_results
+WHERE product_id = 'product-123'
+ORDER BY forecast_date;
+```
+
+**Expected Results:**
+- Multiple rows representing different forecast periods
+- Consistent `requestId` across all periods from same run
+- Valid `forecast_date` values (future dates)
+- Non-null `model_version` and `explanation` fields
+- Timestamps indicating when forecast was generated
+
+### 3. End-to-End Verification
+
+**Steps:**
+1. Trigger forecast via API: `POST /forecast`
+2. Note the `requestId` from response
+3. Check Motia logs for pipeline progression
+4. Query Supabase for new forecast records
+5. Verify data consistency between logs and database
+
+## Intentionally Unimplemented Features
+
+This hackathon project focuses on core architecture and explicitly does not implement:
+
+### Scheduling & Automation
+- **No cron jobs or scheduled execution** - Forecasts are manually triggered via API
+- **No automatic retries** - Pipeline must be manually re-triggered on failure
+- **No event-based triggers** - No webhook listeners or real-time event processing
+
+### Platform Integration
+- **No Shopify integration** - Hardcoded store IDs, no OAuth flows
+- **No e-commerce platform connectors** - Manual data insertion required
+- **No billing or subscription management** - Single-tenant architecture
+
+### Advanced Forecasting
+- **No machine learning models** - Simple deterministic algorithms only
+- **No model training or optimization** - Fixed forecasting parameters
+- **No ensemble methods** - Single forecasting approach
+- **No external data sources** - Only uses internal historical data
+
+### Production Features
+- **No authentication/authorization** - Open API endpoints
+- **No rate limiting** - Unrestricted API access
+- **No monitoring/alerting** - Manual log checking required
+- **No data validation UI** - Errors require manual inspection
+
+### Data Management
+- **No data import/export tools** - Manual database operations
+- **No historical data cleanup** - Unbounded data growth
+- **No forecast versioning** - Single model version support
+
+These omissions are intentional to focus on the core forecasting pipeline architecture and execution reliability.
 
 ## Future Extensions
 
-- Integration with Shopify webhooks for real-time order events
+The system is designed for extensibility. Future enhancements could include:
 
-- SKU-level forecasting with lead-time awareness
+- **Shopify Integration**: Webhook listeners for real-time order events, OAuth flows
+- **Advanced ML**: Pluggable forecasting models, model training pipelines
+- **Scheduling**: Cron-based execution, automatic retry logic
+- **Multi-tenancy**: Store isolation, permission management
+- **Observability**: Dashboards, alerting, performance metrics
+- **Data Pipeline**: Automated data ingestion, validation, and cleanup
 
-- Automated re-training or logic switching based on forecast accuracy
+## Development Setup
 
-- Alerting and decision-support layers built on top of forecast results
+1. **Prerequisites**: Node.js, npm, Docker, Supabase CLI
+2. **Installation**: `npm install`
+3. **Database**: `supabase start`
+4. **Execution**: `npm run dev`
+5. **Trigger**: `POST /forecast` with product parameters
 
-## Why This Project
-
-Rather than treating forecasting as a one-off AI task, this project treats it as a long-running backend system problem.
-
-The primary focus is on system design decisions — durability, idempotency, observability, and extensibility — which are critical for production-grade forecasting systems.
-
-## Workflow: ForecastPipeline
-
-1. load_historical_facts
-2. validate_and_normalize_data
-3. generate_features
-4. run_forecast
-5. persist_forecast_result
-6. evaluate_against_actuals
-7. emit_metrics_and_logs
-
-Workflow: forecast_pipeline
-
-Purpose:
-Generate and persist a single forecast run based on historical facts, ensuring reproducibility, idempotency, and observability.
-
-1. load_historical_facts
-
-Loads historical sales and inventory facts from the database for the target scope and time range.
-Guarantee: All downstream steps operate on a consistent, immutable snapshot of factual data.
-
-2. validate_and_fill_gaps
-
-Validates data completeness and applies gap-filling or fallback rules for missing values.
-Guarantee: No downstream step receives incomplete or structurally invalid time-series data.
-
-3. aggregate_time_windows
-
-Aggregates raw facts into predefined time windows (e.g. rolling averages, weekly buckets).
-Guarantee: Forecast inputs are normalized and comparable across SKUs and time ranges.
-
-4. generate_forecast
-
-Generates forecast values using a pluggable prediction strategy.
-Guarantee: A forecast is produced deterministically from the aggregated inputs.
-
-5. explain_forecast
-
-Generates a human-readable explanation describing why the forecast changed or remained stable.
-Guarantee: Each forecast result is accompanied by an interpretable rationale.
-
-6. persist_forecast_result
-
-Persists forecast outputs as immutable prediction records.
-Guarantee: Forecast results are never overwritten and can be audited historically.
-
-7. record_forecast_metrics
-
-Compares forecasts against known outcomes (when available) and records evaluation metrics.
-Guarantee: Forecast accuracy can be tracked and analyzed over time.
-
-## Job: DailyAggregationJob
-Schedule: once per day
-
-- aggregate_daily_sales
-- aggregate_inventory_snapshot
-- persist_daily_facts
-
-Job: daily_fact_aggregation
-- Periodically aggregates raw events into immutable factual records.
-
-
-## TODO
-- [ ] Supabase connection
-- [ ] Daily aggregation job
-- [ ] Forecast workflow
+The system is designed for local development and testing, with clear separation between historical facts and forecast predictions for reproducibility and auditability.
