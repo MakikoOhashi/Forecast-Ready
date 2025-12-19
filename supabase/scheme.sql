@@ -69,3 +69,9 @@ create table forecast.forecast_evaluations (
 create index on forecast.daily_sales (product_id, sales_date);
 create index on forecast.inventory_snapshots (product_id, snapshot_date);
 create index on forecast.forecast_results (product_id, forecast_date);
+
+
+--AI
+alter table forecast.forecast_results
+add column forecast_rationale text;
+-- 予測根拠（AI生成）
