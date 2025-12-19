@@ -1,5 +1,6 @@
 import type { EventConfig, Handlers } from 'motia';
 import { z } from 'zod';
+import { supabase } from '../lib/supabase';
 
 const inputSchema = z.object({
   requestId: z.string(),
@@ -20,30 +21,99 @@ export const config: EventConfig = {
 export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, emit }) => {
   const { requestId, productId = 'default-product', timeRange = 'last-30-days' } = input;
 
-  logger.info('Loading historical facts', {
+  logger.info('Loading historical facts from Supabase', {
     requestId,
     productId,
     timeRange,
     step: 'load_historical_facts'
   });
 
-  // Simulate loading historical data
+  // Query daily sales data from Supabase
+  logger.info('Querying daily sales data from Supabase', {
+    requestId,
+    productId,
+    step: 'load_historical_facts'
+  });
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const { data: salesData, error: salesError } = await supabase
+    .from('forecast.daily_sales')
+    .select('sales_date, quantity')
+    .eq('product_id', productId)
+    .gte('sales_date', thirtyDaysAgo.toISOString().split('T')[0])
+    .order('sales_date', { ascending: true });
+
+  if (salesError) {
+    logger.error('Failed to load daily sales data', {
+      requestId,
+      error: salesError.message,
+      step: 'load_historical_facts'
+    });
+    throw new Error(`Failed to load daily sales data: ${salesError.message}`);
+  }
+
+  if (!salesData || salesData.length === 0) {
+    logger.error('No daily sales data found', {
+      requestId,
+      productId,
+      step: 'load_historical_facts'
+    });
+    throw new Error(`No daily sales data found for product ${productId}`);
+  }
+
+  // Query inventory snapshots data from Supabase
+  logger.info('Querying inventory snapshots data from Supabase', {
+    requestId,
+    productId,
+    step: 'load_historical_facts'
+  });
+
+  const { data: inventoryData, error: inventoryError } = await supabase
+    .from('forecast.inventory_snapshots')
+    .select('snapshot_date, inventory_level')
+    .eq('product_id', productId)
+    .gte('snapshot_date', thirtyDaysAgo.toISOString().split('T')[0])
+    .order('snapshot_date', { ascending: true });
+
+  if (inventoryError) {
+    logger.error('Failed to load inventory snapshots data', {
+      requestId,
+      error: inventoryError.message,
+      step: 'load_historical_facts'
+    });
+    throw new Error(`Failed to load inventory snapshots data: ${inventoryError.message}`);
+  }
+
+  if (!inventoryData || inventoryData.length === 0) {
+    logger.error('No inventory snapshots data found', {
+      requestId,
+      productId,
+      step: 'load_historical_facts'
+    });
+    throw new Error(`No inventory snapshots data found for product ${productId}`);
+  }
+
+  // Combine data for downstream processing
   const historicalData = {
     productId,
     timeRange,
-    dataPoints: [
-      { date: '2023-01-01', value: 100 },
-      { date: '2023-01-02', value: 110 },
-      { date: '2023-01-03', value: 105 },
-      { date: '2023-01-04', value: 120 },
-      { date: '2023-01-05', value: 115 }
-    ],
+    dailySales: salesData.map(item => ({
+      date: item.sales_date,
+      value: item.quantity
+    })),
+    inventorySnapshots: inventoryData.map(item => ({
+      date: item.snapshot_date,
+      value: item.inventory_level
+    })),
     loadedAt: new Date().toISOString()
   };
 
-  logger.info('Historical facts loaded successfully', {
+  logger.info('Historical facts loaded successfully from Supabase', {
     requestId,
-    dataPointsCount: historicalData.dataPoints.length,
+    dailySalesCount: historicalData.dailySales.length,
+    inventorySnapshotsCount: historicalData.inventorySnapshots.length,
     step: 'load_historical_facts'
   });
 
