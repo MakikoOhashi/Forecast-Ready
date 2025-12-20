@@ -32,12 +32,20 @@ This forecasting system uses **Motia** as the orchestration engine and **Supabas
 - Provides event-driven architecture with state persistence
 - Handles asynchronous processing and error recovery
 - Offers observability through logging and metrics
+- Uses plugins: `@motiadev/plugin-endpoint`, `@motiadev/plugin-logs`, `@motiadev/plugin-observability`, `@motiadev/plugin-states`, `@motiadev/plugin-bullmq`
 
 **Supabase (PostgreSQL)** serves as the source of truth:
 - Stores immutable historical facts (sales, inventory)
 - Persists immutable forecast predictions
 - Maintains relationships between stores, products, and forecasts
 - Provides queryable results for verification and analysis
+- Uses PostgreSQL 17 with custom `forecast` schema
+
+**Google Gemini AI** provides explainability:
+- Generates human-readable explanations for deterministic forecasts
+- Uses `gemini-1.5-flash` model via `@google/generative-ai` SDK
+- Provides fallback explanations when AI fails
+- Maintains complete separation from deterministic forecast logic
 
 ## Execution Flow
 
@@ -115,16 +123,20 @@ The `forecast_pipeline` consists of three deterministic steps:
 - Computes trend slope from first to last data point (deterministic)
 - Generates 5-period forecast using formula: `moving_average + (trend_slope * days_ahead)`
 - Calculates confidence intervals based on historical variance
+- Generates AI-powered human-readable explanation using Google Gemini
+- Provides deterministic fallback explanation if AI fails
 - Emits `persist-forecast-result` event with forecast results
 
 **Forecast Method:** Deterministic moving average with trend adjustment
 **Confidence Level:** 95% (configurable)
+**AI Integration:** Google Gemini 1.5 Flash model for explainability
 
 **Output Structure:**
 ```typescript
 {
   requestId: string,
   productId: string,
+  storeId: string,
   generatedAt: string,
   forecastMethod: string,
   confidenceLevel: number,
@@ -140,7 +152,8 @@ The `forecast_pipeline` consists of three deterministic steps:
     trend: number,
     movingAverage: number,
     trendSlope: number
-  }
+  },
+  forecastRationale: string // AI-generated explanation
 }
 ```
 
@@ -303,11 +316,73 @@ The system is designed for extensibility. Future enhancements could include:
 
 ## Development Setup
 
-1. **Prerequisites**: Node.js, npm, Docker, Supabase CLI
-2. **Installation**: `npm install`
-3. **Database**: `supabase start`
-4. **Execution**: `npm run dev`
-5. **Trigger**: `POST /forecast` with product parameters
+### Prerequisites
+- Node.js (v18+)
+- npm (v9+)
+- Docker (for Supabase)
+- Supabase CLI
+- Google Gemini API key (optional, for AI explanations)
+
+### Installation
+```bash
+cd motia-app
+npm install
+```
+
+### Configuration
+1. Set up environment variables in `.env` file:
+```env
+GEMINI_API_KEY=your-gemini-api-key
+SUPABASE_URL=http://localhost:54321
+SUPABASE_KEY=your-supabase-key
+```
+
+2. Initialize Supabase database:
+```bash
+supabase start
+```
+
+### Available Scripts
+- `npm run dev`: Start development server with hot reloading
+- `npm start`: Start production server
+- `npm run build`: Build for production
+- `npm run generate-types`: Generate TypeScript types
+- `npm run clean`: Clean build artifacts
+
+### Running the Pipeline
+1. Start the Motia application: `npm run dev`
+2. Trigger forecast via API:
+```bash
+curl -X POST http://localhost:3000/forecast \
+  -H "Content-Type: application/json" \
+  -d '{"productId": "product-123", "timeRange": "last-30-days"}'
+```
+
+### Project Structure
+```
+motia-app/
+├── src/
+│   ├── api/                  # API endpoints
+│   ├── forecast/             # Forecast pipeline steps
+│   │   ├── forecast-api.step.ts
+│   │   ├── generate-forecast.step.ts
+│   │   ├── load-historical-facts.step.ts
+│   │   └── persist-forecast-result.step.ts
+│   ├── hello/                # Example hello world flow
+│   └── lib/                  # Utility libraries
+│       ├── gemini-client.ts  # Google Gemini AI client
+│       └── supabase.ts       # Supabase client
+├── motia.config.ts           # Motia configuration
+├── package.json              # Dependencies and scripts
+└── tsconfig.json             # TypeScript configuration
+```
+
+### Key Dependencies
+- **Motia Core**: `@motiadev/core@0.17.9-beta.191`
+- **Motia Plugins**: Endpoint, Logs, Observability, States, BullMQ
+- **Database**: `@supabase/supabase-js@2.89.0`
+- **AI**: `@google/generative-ai@0.24.1`
+- **Validation**: `zod@4.1.12`
 
 The system is designed for local development and testing, with clear separation between historical facts and forecast predictions for reproducibility and auditability.
 
