@@ -11,6 +11,7 @@ const inputSchema = z.object({
   requestId: z.string(),
   historicalData: z.object({
     productId: z.string(),
+    storeId: z.string(),
     timeRange: z.string(),
     dailySales: z.array(z.object({
       date: z.string(),
@@ -137,6 +138,7 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
   const forecastResult = {
     requestId,
     productId: historicalData.productId,
+    storeId: historicalData.storeId,
     generatedAt: new Date().toISOString(),
     forecastMethod: 'deterministic-moving-average-with-trend',
     confidenceLevel: forecastParameters.confidenceLevel,

@@ -8,6 +8,7 @@ const inputSchema = z.object({
   forecastResult: z.object({
     requestId: z.string(),
     productId: z.string(),
+    storeId: z.string(),
     generatedAt: z.string(),
     forecastMethod: z.string(),
     confidenceLevel: z.number(),
@@ -66,10 +67,12 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
     step: 'persist_forecast_result'
   });
 
-  // For now, use a hardcoded store_id and product_id since we don't have the actual IDs
-  // In a production environment, these would come from the database lookup
-  const storeId = '00000000-0000-0000-0000-000000000000'; // Default store
-  const productId = forecastResult.productId; // Use the productId as-is
+  // Use the store_id from the forecast result (with type assertion)
+  const typedForecastResultWithStore = forecastResult as typeof forecastResult & {
+    storeId: string;
+  };
+  const storeId = typedForecastResultWithStore.storeId;
+  const productId = forecastResult.productId;
 
   // Insert each forecast period as a separate row in Supabase
   const insertPromises = typedForecastResult.forecastPeriods.map(async (period, index) => {

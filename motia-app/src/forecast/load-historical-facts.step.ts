@@ -44,7 +44,7 @@ export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, 
 
   const { data: salesData, error: salesError } = await supabase
     .from('f1_daily_sales')
-    .select('sales_date, quantity')
+    .select('sales_date, quantity, store_id')
     .eq('product_id', productId)
     .gte('sales_date', thirtyDaysAgo.toISOString().split('T')[0])
     .order('sales_date', { ascending: true });
@@ -99,9 +99,13 @@ export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, 
     throw new Error(`No inventory snapshots data found for product ${productId}`);
   }
 
+  // Extract store_id from the first sales record
+  const storeId = salesData[0].store_id;
+
   // Combine data for downstream processing
   const historicalData = {
     productId,
+    storeId,
     timeRange,
     dailySales: salesData.map(item => ({
       date: item.sales_date,
