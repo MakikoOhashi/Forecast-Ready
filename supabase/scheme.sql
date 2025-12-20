@@ -75,3 +75,19 @@ create index on forecast.forecast_results (product_id, forecast_date);
 alter table forecast.forecast_results
 add column forecast_rationale text;
 -- 予測根拠（AI生成）
+
+-- Supabase SQL Editor
+-- Move all forecast tables to public
+ALTER TABLE forecast.daily_sales SET SCHEMA public;
+ALTER TABLE forecast.inventory_snapshots SET SCHEMA public;
+ALTER TABLE forecast.forecast_results SET SCHEMA public;
+ALTER TABLE forecast.products SET SCHEMA public;
+ALTER TABLE forecast.stores SET SCHEMA public;
+ALTER TABLE forecast.forecast_evaluations SET SCHEMA public;
+
+ALTER TABLE public.daily_sales RENAME TO f1_daily_sales;
+ALTER TABLE public.inventory_snapshots RENAME TO f1_inventory_snapshots;
+ALTER TABLE public.forecast_results RENAME TO f1_forecast_results;
+ALTER TABLE public.products RENAME TO f1_products;
+ALTER TABLE public.stores RENAME TO f1_stores;
+ALTER TABLE public.forecast_evaluations RENAME TO f1_forecast_evaluations;

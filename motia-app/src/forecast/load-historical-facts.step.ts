@@ -43,8 +43,7 @@ export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, 
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const { data: salesData, error: salesError } = await supabase
-    .schema('forecast')
-    .from('daily_sales')
+    .from('f1_daily_sales')
     .select('sales_date, quantity')
     .eq('product_id', productId)
     .gte('sales_date', thirtyDaysAgo.toISOString().split('T')[0])
@@ -76,8 +75,7 @@ export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, 
   });
 
   const { data: inventoryData, error: inventoryError } = await supabase
-    .schema('forecast')
-    .from('inventory_snapshots')
+    .from('f1_inventory_snapshots')
     .select('snapshot_date, inventory_level')
     .eq('product_id', productId)
     .gte('snapshot_date', thirtyDaysAgo.toISOString().split('T')[0])

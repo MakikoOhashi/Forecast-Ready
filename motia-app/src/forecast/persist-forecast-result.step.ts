@@ -101,8 +101,7 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
 
     // Try to insert with forecast_rationale first
     let insertResult = await supabase
-      .schema('forecast')
-      .from('forecast_results')
+      .from('f1_forecast_results')
       .insert(insertData)
       .select();
 
@@ -121,8 +120,7 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
     const { forecast_rationale: _, ...fallbackData } = fallbackInsertData;
 
       insertResult = await supabase
-        .schema('forecast')
-        .from('forecast_results')
+        .from('f1_forecast_results')
         .insert(fallbackInsertData)
         .select();
     }
@@ -177,9 +175,6 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
         });
       }
     });
-
-    logger.info('=== PERSIST FORECAST RESULT STEP COMPLETED SUCCESSFULLY ===');
-    logger.info('=== FORECAST PIPELINE COMPLETED END-TO-END ===');
 
   } catch (error) {
     logger.error('Failed to persist forecast results to Supabase', {

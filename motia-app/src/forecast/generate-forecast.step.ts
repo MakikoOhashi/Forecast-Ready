@@ -243,15 +243,6 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
     step: 'generate_forecast'
   });
 
-  logger.info('Emitting persist-forecast-result event with generated forecast', {
-    requestId,
-    productId: historicalData.productId,
-    forecastPeriodsCount: forecastResult.forecastPeriods.length,
-    averageForecast: forecastResult.forecastSummary.averageForecast,
-    topic: 'persist-forecast-result',
-    step: 'generate_forecast'
-  });
-
   // Emit event for persisting forecast result
   await emit({
     topic: 'persist-forecast-result',
@@ -260,6 +251,4 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
       forecastResult
     }
   });
-
-  logger.info('=== GENERATE FORECAST STEP COMPLETED SUCCESSFULLY ===');
 };
