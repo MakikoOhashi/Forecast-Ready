@@ -101,7 +101,8 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
 
     // Try to insert with forecast_rationale first
     let insertResult = await supabase
-      .from('forecast.forecast_results')
+      .schema('forecast')
+      .from('forecast_results')
       .insert(insertData)
       .select();
 
@@ -120,7 +121,8 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
     const { forecast_rationale: _, ...fallbackData } = fallbackInsertData;
 
       insertResult = await supabase
-        .from('forecast.forecast_results')
+        .schema('forecast')
+        .from('forecast_results')
         .insert(fallbackInsertData)
         .select();
     }
