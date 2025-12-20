@@ -39,7 +39,17 @@ export const config: EventConfig = {
 };
 
 export const handler: Handlers['GenerateForecast'] = async (input, { logger, emit }) => {
+  logger.info('=== GENERATE FORECAST STEP STARTED ===');
+
   const { requestId, historicalData, forecastParameters } = input;
+
+  logger.info('Generate forecast step received input', {
+    requestId,
+    inputReceived: !!input,
+    historicalDataPresent: !!historicalData,
+    forecastParametersPresent: !!forecastParameters,
+    step: 'generate_forecast'
+  });
 
   // This forecast is fully determined by the historical facts loaded from the database.
   // No randomness, no external calls, no hidden state - purely deterministic.
@@ -223,6 +233,25 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
     forecastResult.forecastRationale = fallbackExplanation;
   }
 
+  // Log the forecast rationale before emitting
+  logger.info('Forecast rationale generated', {
+    requestId,
+    productId: historicalData.productId,
+    forecastRationale: forecastResult.forecastRationale,
+    hasRationale: !!forecastResult.forecastRationale,
+    rationaleLength: forecastResult.forecastRationale?.length || 0,
+    step: 'generate_forecast'
+  });
+
+  logger.info('Emitting persist-forecast-result event with generated forecast', {
+    requestId,
+    productId: historicalData.productId,
+    forecastPeriodsCount: forecastResult.forecastPeriods.length,
+    averageForecast: forecastResult.forecastSummary.averageForecast,
+    topic: 'persist-forecast-result',
+    step: 'generate_forecast'
+  });
+
   // Emit event for persisting forecast result
   await emit({
     topic: 'persist-forecast-result',
@@ -231,4 +260,6 @@ export const handler: Handlers['GenerateForecast'] = async (input, { logger, emi
       forecastResult
     }
   });
+
+  logger.info('=== GENERATE FORECAST STEP COMPLETED SUCCESSFULLY ===');
 };

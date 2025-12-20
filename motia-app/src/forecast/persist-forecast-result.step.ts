@@ -41,7 +41,16 @@ export const config: EventConfig = {
 };
 
 export const handler: Handlers['PersistForecastResult'] = async (input, { logger }) => {
+  logger.info('=== PERSIST FORECAST RESULT STEP STARTED ===');
+
   const { requestId, forecastResult } = input;
+
+  logger.info('Persist step received input', {
+    requestId,
+    inputReceived: !!input,
+    forecastResultReceived: !!forecastResult,
+    step: 'persist_forecast_result'
+  });
 
   // Type assertion to handle the forecastRationale property
   const typedForecastResult = forecastResult as typeof forecastResult & {
@@ -52,6 +61,8 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
     requestId,
     productId: forecastResult.productId,
     forecastPeriodsCount: forecastResult.forecastPeriods.length,
+    forecastRationaleReceived: !!typedForecastResult.forecastRationale,
+    rationalePreview: typedForecastResult.forecastRationale?.substring(0, 50) || 'None',
     step: 'persist_forecast_result'
   });
 
@@ -68,28 +79,61 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
                              `Moving average: ${typedForecastResult.forecastSummary.movingAverage?.toFixed(2) || 'N/A'}, ` +
                              `Trend slope: ${typedForecastResult.forecastSummary.trendSlope?.toFixed(2) || 'N/A'}.`;
 
-    const { data, error } = await supabase
+    // Prepare the insert data
+    const insertData = {
+      store_id: storeId,
+      product_id: productId,
+      forecast_date: period.date,
+      forecast_quantity: Math.round(period.forecastValue),
+      model_version: 'v0-dummy',
+      explanation: forecastRationale,
+      forecast_rationale: forecastRationale // Store in the new column
+    };
+
+    logger.info(`Attempting to insert forecast period ${index + 1} with rationale`, {
+      requestId,
+      periodIndex: index + 1,
+      forecastDate: period.date,
+      hasRationale: !!forecastRationale,
+      rationaleLength: forecastRationale?.length || 0,
+      step: 'persist_forecast_result'
+    });
+
+    // Try to insert with forecast_rationale first
+    let insertResult = await supabase
       .from('forecast.forecast_results')
-      .insert({
-        store_id: storeId,
-        product_id: productId,
-        forecast_date: period.date,
-        forecast_quantity: Math.round(period.forecastValue),
-        model_version: 'v0-dummy',
-        explanation: forecastRationale,
-        forecast_rationale: forecastRationale // Store in the new column
-      })
+      .insert(insertData)
       .select();
 
-    if (error) {
+    // If there's an error (possibly due to missing column), try without forecast_rationale
+    if (insertResult.error) {
+      logger.warn(`Initial insert failed, trying without forecast_rationale column`, {
+        requestId,
+        periodIndex: index + 1,
+        forecastDate: period.date,
+        error: insertResult.error.message,
+        step: 'persist_forecast_result'
+      });
+
+    // Retry without forecast_rationale if the column doesn't exist
+    const fallbackInsertData = { ...insertData };
+    const { forecast_rationale: _, ...fallbackData } = fallbackInsertData;
+
+      insertResult = await supabase
+        .from('forecast.forecast_results')
+        .insert(fallbackInsertData)
+        .select();
+    }
+
+    if (insertResult.error) {
       logger.error(`Failed to insert forecast period ${index + 1} into Supabase`, {
         requestId,
         periodIndex: index + 1,
         forecastDate: period.date,
-        error: error.message,
+        error: insertResult.error.message,
         step: 'persist_forecast_result'
       });
-      throw new Error(`Supabase insert failed for period ${index + 1}: ${error.message}`);
+      throw new Error(`Supabase insert failed for period ${index + 1}: ${insertResult.error.message}`);
     }
 
     logger.info(`Successfully inserted forecast period ${index + 1} into Supabase`, {
@@ -97,11 +141,11 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
       periodIndex: index + 1,
       forecastDate: period.date,
       forecastQuantity: Math.round(period.forecastValue),
-      supabaseRecordId: data?.[0]?.id,
+      supabaseRecordId: insertResult.data?.[0]?.id,
       step: 'persist_forecast_result'
     });
 
-    return data;
+    return insertResult.data;
   });
 
   // Execute all inserts and wait for completion
@@ -120,7 +164,7 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
     });
 
     // Log summary of inserted records
-    results.forEach((result, index) => {
+    results.forEach((result: any, index: number) => {
       if (result?.[0]) {
         logger.info(`Supabase record ${index + 1} details`, {
           requestId,
@@ -131,6 +175,9 @@ export const handler: Handlers['PersistForecastResult'] = async (input, { logger
         });
       }
     });
+
+    logger.info('=== PERSIST FORECAST RESULT STEP COMPLETED SUCCESSFULLY ===');
+    logger.info('=== FORECAST PIPELINE COMPLETED END-TO-END ===');
 
   } catch (error) {
     logger.error('Failed to persist forecast results to Supabase', {

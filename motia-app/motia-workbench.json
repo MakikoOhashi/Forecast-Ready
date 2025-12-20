@@ -16,13 +16,21 @@
   {
     "id": "forecast_pipeline",
     "config": {
-      "src/forecast/forecast-api.step.ts": {
-        "x": 199,
-        "y": -16
+      "src/forecast/persist-forecast-result.step.ts": {
+        "x": 1007,
+        "y": 24
+      },
+      "src/forecast/load-historical-facts.step.ts": {
+        "x": 294,
+        "y": 34
       },
       "src/forecast/generate-forecast.step.ts": {
-        "x": 583,
-        "y": 16
+        "x": 610,
+        "y": 34
+      },
+      "src/forecast/forecast-api.step.ts": {
+        "x": -37,
+        "y": -1
       }
     }
   }

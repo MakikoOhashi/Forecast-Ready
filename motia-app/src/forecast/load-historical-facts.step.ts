@@ -19,13 +19,17 @@ export const config: EventConfig = {
 };
 
 export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, emit }) => {
+  logger.info('=== LOAD HISTORICAL FACTS STEP STARTED ===');
+
   const { requestId, productId = 'default-product', timeRange = 'last-30-days' } = input;
 
   logger.info('Loading historical facts from Supabase', {
     requestId,
     productId,
     timeRange,
-    step: 'load_historical_facts'
+    step: 'load_historical_facts',
+    inputReceived: !!input,
+    inputDetails: `requestId: ${requestId}, productId: ${productId}, timeRange: ${timeRange}`
   });
 
   // Query daily sales data from Supabase
@@ -117,6 +121,14 @@ export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, 
     step: 'load_historical_facts'
   });
 
+  logger.info('Emitting generate-forecast event with loaded historical data', {
+    requestId,
+    topic: 'generate-forecast',
+    dailySalesCount: historicalData.dailySales.length,
+    inventorySnapshotsCount: historicalData.inventorySnapshots.length,
+    step: 'load_historical_facts'
+  });
+
   // Emit event for forecast generation
   await emit({
     topic: 'generate-forecast',
@@ -129,4 +141,6 @@ export const handler: Handlers['LoadHistoricalFacts'] = async (input, { logger, 
       }
     }
   });
+
+  logger.info('=== LOAD HISTORICAL FACTS STEP COMPLETED SUCCESSFULLY ===');
 };

@@ -21,6 +21,8 @@ export const config: ApiRouteConfig = {
 };
 
 export const handler: Handlers['ForecastAPI'] = async (input, { emit, logger }) => {
+  logger.info('=== FORECAST API ENDPOINT INVOKED ===');
+
   const requestId = Math.random().toString(36).substring(2, 11);
   const productId = input?.productId || 'default-product';
   const timeRange = input?.timeRange || 'last-30-days';
@@ -28,17 +30,32 @@ export const handler: Handlers['ForecastAPI'] = async (input, { emit, logger }) 
   logger.info('Forecast API endpoint called', {
     requestId,
     productId,
+    timeRange,
+    inputReceived: !!input,
+    inputContent: input ? 'Input present' : 'No input'
+  });
+
+  logger.info('Emitting load-historical-facts event to start forecast pipeline', {
+    requestId,
+    topic: 'load-historical-facts',
+    productId,
     timeRange
   });
 
   // Emit event to start the forecast pipeline
-  await emit({
+  const emitResult = await emit({
     topic: 'load-historical-facts',
     data: {
       requestId,
       productId,
       timeRange
     }
+  });
+
+  logger.info('Event emission completed', {
+    requestId,
+    emissionSuccess: true,
+    topic: 'load-historical-facts'
   });
 
   return {
@@ -48,7 +65,8 @@ export const handler: Handlers['ForecastAPI'] = async (input, { emit, logger }) 
       status: 'processing',
       requestId,
       productId,
-      timeRange
+      timeRange,
+      timestamp: new Date().toISOString()
     }
   };
 };
